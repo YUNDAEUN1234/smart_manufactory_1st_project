@@ -3,7 +3,7 @@
 ------------------------------------------------------------
 원예장비 제조업체 사례를 기반으로 한 인터랙티브 의사결정 도구.
 수요·비용·생산능력 파라미터를 실시간으로 조정하며
-LP 최적화 / 평준화 / 추종 세 전략을 즉시 비교할 수 있습니다.
+LP / IP 최적해를 즉시 확인할 수 있습니다.
 
 스택: Streamlit · PuLP (CBC 솔버) · Plotly
 """
@@ -31,19 +31,7 @@ PALETTE = [PRIMARY, PRIMARY_LIGHT, "#93c5fd", ACCENT,
 
 FONT_FAMILY = "-apple-system, 'Segoe UI', sans-serif"
 
-# 전략 메타데이터: key → (표시명, 색상)
-STRATEGY_META: dict[str, tuple[str, str]] = {
-    "optimal": ("🤖 LP 최적화", PRIMARY),
-    "level":   ("🟦 평준화",    PRIMARY_LIGHT),
-    "chase":   ("🟧 추종",      ACCENT),
-}
 
-# 전략 라디오 버튼 라벨
-STRATEGY_LABELS = {
-    "optimal": "🤖 LP 최적화 (혼합 전략)",
-    "level":   "🟦 평준화 (Level) — 인력 일정",
-    "chase":   "🟧 추종 (Chase) — 재고 최소",
-}
 
 
 # ────────────────────────────────────────────────────────────
@@ -231,7 +219,7 @@ def solve_app(
 # 사이드바 입력
 # ────────────────────────────────────────────────────────────
 
-def render_sidebar() -> tuple[list[float], dict, str, bool, bool]:
+def render_sidebar() -> tuple[list[float], dict, bool]:
     """
     사이드바 입력 패널을 렌더링하고 입력값을 반환.
 
@@ -239,9 +227,7 @@ def render_sidebar() -> tuple[list[float], dict, str, bool, bool]:
     -------
     demand       : 월별 수요 리스트
     params       : 최적화 파라미터 딕셔너리
-    strategy     : 선택된 전략 키
     integer_mode : IP 모드 여부
-    compare_all  : 전략 비교 패널 표시 여부
     """
     with st.sidebar:
         st.markdown("## ⚙️ 입력 파라미터")
@@ -304,19 +290,12 @@ def render_sidebar() -> tuple[list[float], dict, str, bool, bool]:
                 subcontract_cost = st.number_input("하청 추가비/개",    0.0, 10_000.0, 30.0, 1.0)
 
         # ── 전략 · 모델 옵션 ──────────────────────────────
-        with st.expander("🎯 전략 · 모델 옵션", expanded=True):
-            strategy = st.radio(
-                "주 전략",
-                options=list(STRATEGY_LABELS.keys()),
-                format_func=lambda x: STRATEGY_LABELS[x],
-                index=0,
-            )
+        with st.expander("🎯 모델 옵션", expanded=True):
             integer_mode = st.checkbox(
                 "정수 계획 (IP 모드)",
                 value=False,
                 help="작업자·생산량을 정수로 강제합니다.",
             )
-            compare_all = st.checkbox("📊 전략별 비교 패널 표시", value=True)
 
     params = dict(
         reg_wage=reg_wage,           ot_wage=ot_wage,
@@ -329,7 +308,7 @@ def render_sidebar() -> tuple[list[float], dict, str, bool, bool]:
         init_inventory=init_inventory,
         final_inventory=final_inventory,
     )
-    return demand, params, strategy, integer_mode, compare_all
+    return demand, params, integer_mode
 
 
 # ────────────────────────────────────────────────────────────
@@ -338,7 +317,7 @@ def render_sidebar() -> tuple[list[float], dict, str, bool, bool]:
 
 def render_kpi(result: dict, demand: list[float], n_periods: int) -> dict:
     """
-    상단 KPI 카드 5개와 자동 진단 메시지를 렌더링.
+    상단 KPI 카드 4개를 렌더링.
 
     Returns
     -------
@@ -353,34 +332,19 @@ def render_kpi(result: dict, demand: list[float], n_periods: int) -> dict:
     total_ot     = sum(result["O"][1:])
     total_demand = sum(demand)
 
-    # 추정 이익 (판가 40천원/개 가정)
-    revenue = 40.0 * total_demand
-    profit  = revenue - total_cost
-
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("💰 총 비용",     f"{total_cost:,.0f} 천원",
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("💰 총 비용",
+              f"{total_cost:,.0f} 천원",
               f"₩ {total_cost * 1000:,.0f}")
-    k2.metric("📈 추정 이익",   f"{profit:,.0f} 천원",
-              f"매출 가정 {revenue:,.0f} 천원")
-    k3.metric("📦 수요 / 공급",
+    k2.metric("📦 수요 / 공급",
               f"{int(total_demand):,} / {sum(result['P'][1:]) + total_subc:,.0f} 개",
               f"외주 {int(total_subc):,} · 부재고 {int(total_short):,}")
-    k4.metric("👥 평균 인력",   f"{avg_workers:.1f} 명",
+    k3.metric("👥 평균 인력",
+              f"{avg_workers:.1f} 명",
               f"고용 {total_hire:.0f} · 해고 {total_layoff:.0f}")
-    k5.metric("⏰ 총 초과근무", f"{total_ot:,.0f} 시간",
+    k4.metric("⏰ 총 초과근무",
+              f"{total_ot:,.0f} 시간",
               f"평균 {total_ot / n_periods:.1f} 시간/월")
-
-    # 운영 상태 자동 진단
-    diag = []
-    if total_short > 0:
-        diag.append(f"⚠️ 부재고 발생: {total_short:.0f}개 — 수요 일부가 지연 충족됩니다.")
-    if total_subc > 0:
-        diag.append(f"📤 외주 사용: {total_subc:.0f}개 — 자체 생산능력을 초과한 분량입니다.")
-    if total_ot / max(avg_workers * n_periods, 1) > 8:
-        diag.append("⚠️ 초과근무 강도 높음 — 인력 충원 검토를 권장합니다.")
-    if not diag:
-        diag.append("✅ 정상 운영 — 부재고·외주 없이 정규생산으로 수요를 충족합니다.")
-    st.info("  ".join(diag))
 
     return dict(
         total_cost=total_cost,   total_subc=total_subc,
@@ -603,135 +567,12 @@ def render_operation_charts(
 
 
 # ────────────────────────────────────────────────────────────
-# 전략 비교 패널
-# ────────────────────────────────────────────────────────────
-
-def render_strategy_comparison(
-    demand: list[float], params: dict,
-    strategy: str, integer_mode: bool,
-    months_full: list[str],
-) -> None:
-    """세 전략을 동시에 풀어 비용·인력·재고 추이를 나란히 비교."""
-    st.markdown("## 🔍 전략별 비교 분석")
-
-    # 세 전략 모두 풀기 (캐시 덕분에 현재 전략은 재계산 없음)
-    comparison = {
-        s: (label, solve_app(tuple(demand), params, strategy=s, integer=integer_mode))
-        for s, (label, _) in STRATEGY_META.items()
-    }
-
-    # ── 비용 요약 테이블 ──────────────────────────────────
-    rows = []
-    for s, (name, r) in comparison.items():
-        if r is None:
-            rows.append({"전략": name, "총비용 (천원)": "❌ 해 없음 (Infeasible)"})
-            continue
-        b = r["cost_breakdown"]
-        rows.append({
-            "전략":            name + (" ★" if s == strategy else ""),
-            "총비용 (천원)":   round(r["total_cost"]),
-            "정규임금":        round(b["정규임금"]),
-            "초과근무":        round(b["초과근무"]),
-            "고용+해고":       round(b["고용비용"] + b["해고비용"]),
-            "재고유지+부재고": round(b["재고유지"] + b["재고부족"]),
-            "외주 추가비":     round(b["하청추가비"]),
-            "재료비":          round(b["재료비"]),
-            "총 부재고(개)":   round(sum(r["S"][1:])),
-            "총 외주(개)":     round(sum(r["C"][1:])),
-        })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-
-    # ── 자동 추천: 실현가능 전략 중 최저비용 ─────────────
-    feasible = {s: r for s, (_, r) in comparison.items() if r is not None}
-    if feasible:
-        best_s, best_r = min(feasible.items(), key=lambda x: x[1]["total_cost"])
-        best_name   = STRATEGY_META[best_s][0]
-        curr_result = comparison[strategy][1]
-
-        if best_s == strategy:
-            st.success(
-                f"💡 **추천 전략: {best_name}** (현재 선택과 동일) — "
-                f"가능한 전략 중 비용이 가장 낮습니다 ({best_r['total_cost']:,.0f} 천원)."
-            )
-        else:
-            delta = (curr_result["total_cost"] - best_r["total_cost"]
-                     if curr_result is not None else None)
-            msg = f"💡 **추천 전략: {best_name}** — 총비용 {best_r['total_cost']:,.0f} 천원"
-            if delta and delta > 0:
-                msg += f" (현재 선택 대비 **{delta:,.0f} 천원 절감**)"
-            st.success(msg)
-
-    # ── 비용 항목 그룹 바 ─────────────────────────────────
-    cost_items = ["정규임금", "초과근무", "고용비용", "해고비용",
-                  "재고유지", "재고부족", "재료비", "하청추가비"]
-    fig = go.Figure()
-    for s, (name, r) in comparison.items():
-        if r is None:
-            continue
-        fig.add_trace(go.Bar(
-            name=name, x=cost_items,
-            y=[r["cost_breakdown"][k] for k in cost_items],
-            marker_color=STRATEGY_META[s][1],
-        ))
-    fig.update_layout(
-        template="plotly_white", height=420, barmode="group",
-        margin=dict(l=10, r=10, t=20, b=40),
-        yaxis_title="비용 (천원)",
-        legend=dict(orientation="h", yanchor="top", y=-0.15, x=0.5, xanchor="center"),
-        font=dict(family=FONT_FAMILY, size=12),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # ── 인력 / 재고 추이 나란히 ──────────────────────────
-    cmp1, cmp2 = st.columns(2)
-    with cmp1:
-        st.markdown("**전략별 작업자 수 추이**")
-        fig = go.Figure()
-        for s, (name, r) in comparison.items():
-            if r is None:
-                continue
-            fig.add_trace(go.Scatter(
-                x=months_full, y=r["W"], name=name,
-                mode="lines+markers",
-                line=dict(width=2.5, color=STRATEGY_META[s][1]),
-            ))
-        fig.update_layout(
-            template="plotly_white", height=320,
-            margin=dict(l=10, r=10, t=10, b=40),
-            yaxis_title="작업자 수 (명)",
-            legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    with cmp2:
-        st.markdown("**전략별 재고(±부재고) 추이**")
-        fig = go.Figure()
-        for s, (name, r) in comparison.items():
-            if r is None:
-                continue
-            net_inv = [r["I"][t] - r["S"][t] for t in range(len(r["I"]))]
-            fig.add_trace(go.Scatter(
-                x=months_full, y=net_inv, name=name,
-                mode="lines+markers",
-                line=dict(width=2.5, color=STRATEGY_META[s][1]),
-            ))
-        fig.add_hline(y=0, line_dash="dot", line_color="#94a3b8")
-        fig.update_layout(
-            template="plotly_white", height=320,
-            margin=dict(l=10, r=10, t=10, b=40),
-            yaxis_title="순재고 (개)",
-            legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# ────────────────────────────────────────────────────────────
 # 상세 결과 테이블 & CSV 다운로드
 # ────────────────────────────────────────────────────────────
 
 def render_detail_table(
     result: dict, demand: list[float],
-    months_full: list[str], strategy: str,
+    months_full: list[str],
 ) -> None:
     """결정변수 시점별 상세 결과 테이블과 CSV 다운로드 버튼."""
     st.markdown("## 📋 상세 결과")
@@ -755,7 +596,7 @@ def render_detail_table(
         st.download_button(
             "📥 결과 CSV 다운로드",
             data=result_df.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"production_plan_{strategy}.csv",
+            file_name="production_plan.csv",
             mime="text/csv",
         )
 
@@ -764,8 +605,8 @@ def render_detail_table(
 # 수리 모델 & 파라미터 요약 (Expander)
 # ────────────────────────────────────────────────────────────
 
-def render_model_expanders(params: dict, n_periods: int) -> None:
-    """LP/IP 수식 정리 및 현재 입력 파라미터 요약 expander."""
+def render_model_expanders() -> None:
+    """LP/IP 수식 정리 expander."""
 
     with st.expander("📐 수리적 모델 보기 (LP / IP 정식)", expanded=False):
         st.markdown(
@@ -787,43 +628,11 @@ $$\min Z = \sum_{t}\bigl(640\,W_t + 6\,O_t + 300\,H_t + 500\,L_t
 - **초기/최종 조건** : $W_0=80,\; I_0=1000,\; I_T \ge 500,\; S_0=S_T=0$
 - **비음수**         : 모든 변수 $\ge 0$ (IP 모드 시 정수)
 
-##### 전략별 추가 제약
-| 전략 | 추가 제약 | 의미 |
-|---|---|---|
-| 🤖 LP 최적화 | (없음) | 모든 옵션을 동시에 고려해 비용 최소화 |
-| 🟦 평준화 | $H_t = L_t = 0,\; \forall t$ | 인력 변화 없이 일정한 작업자로 운영 |
-| 🟧 추종 | $I_t \le I_T^{target},\; \forall t$ | 재고를 최소화 → 생산이 수요를 추종 |
+##### 전략 옵션
+- **LP 모드** : 모든 변수 연속값 허용 → 소수점 인력도 가능
+- **IP 모드** : 작업자·생산량을 정수로 강제 → 현실적인 계획
             """
         )
-
-    with st.expander("ℹ️ 입력 파라미터 요약", expanded=False):
-        summary_df = pd.DataFrame({
-            "항목": [
-                "계획 기간",     "초기 작업자",  "초기 재고",      "최종 재고 ≥",
-                "월 작업일",     "일 작업시간",  "표준작업시간/개", "초과근무 한도",
-                "정규임금",      "초과근무임금", "고용비",         "해고비",
-                "재고유지비",    "부재고비용",   "재료비",         "하청 추가비",
-            ],
-            "값": [
-                f"{n_periods} 개월",
-                f"{params['init_workforce']} 명",
-                f"{params['init_inventory']:,} 개",
-                f"{params['final_inventory']:,} 개",
-                f"{params['work_days']} 일/월",
-                f"{params['work_hours']} 시간/일",
-                f"{params['std_time']} 시간/개",
-                f"{params['ot_limit']} 시간/인·월",
-                f"{params['reg_wage']} 천원/시",
-                f"{params['ot_wage']} 천원/시",
-                f"{params['hire_cost']:,} 천원/인",
-                f"{params['layoff_cost']:,} 천원/인",
-                f"{params['inv_cost']} 천원/개·월",
-                f"{params['backorder_cost']} 천원/개·월",
-                f"{params['material_cost']} 천원/개",
-                f"{params['subcontract_cost']} 천원/개",
-            ],
-        })
-        st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
 
 # ────────────────────────────────────────────────────────────
@@ -834,14 +643,13 @@ def main() -> None:
     setup_page()
 
     # 1. 사이드바에서 입력 받기
-    demand, params, strategy, integer_mode, compare_all = render_sidebar()
+    demand, params, integer_mode = render_sidebar()
 
     # 2. 페이지 헤더
     st.markdown("# 🏭 총괄생산계획 최적화 대시보드")
     st.markdown(
         f"<p class='small-note'>"
         f"원예장비 제조업체 사례 · LP/IP 기반 의사결정 지원 · "
-        f"전략 = <b>{STRATEGY_LABELS[strategy]}</b> · "
         f"모드 = <b>{'정수(IP)' if integer_mode else '연속(LP)'}</b>"
         f"</p>",
         unsafe_allow_html=True,
@@ -849,15 +657,15 @@ def main() -> None:
 
     # 3. 최적화 실행 (st.cache_data 적용 — 동일 입력 재계산 없음)
     with st.spinner("최적화 풀이 중..."):
-        result = solve_app(tuple(demand), params, strategy=strategy, integer=integer_mode)
+        result = solve_app(tuple(demand), params, strategy="optimal", integer=integer_mode)
 
     if result is None:
         st.error(
             "⚠️ **해를 찾을 수 없습니다 (Infeasible).**\n\n"
-            "선택한 전략과 파라미터 조합으로는 모든 제약을 동시에 만족할 수 없습니다.\n\n"
+            "파라미터 조합으로는 모든 제약을 동시에 만족할 수 없습니다.\n\n"
             "▸ 초기 작업자 수를 늘리거나\n"
             "▸ 최종재고 목표를 낮추거나\n"
-            "▸ 다른 전략을 선택해보세요."
+            "▸ 수요를 조정해보세요."
         )
         st.stop()
 
@@ -877,17 +685,13 @@ def main() -> None:
         agg["total_subc"], agg["total_cost"],
     )
 
-    # 6. 전략 비교 패널 (사이드바에서 체크 시)
-    if compare_all:
-        render_strategy_comparison(demand, params, strategy, integer_mode, months_full)
+    # 6. 상세 결과 테이블 & CSV 다운로드
+    render_detail_table(result, demand, months_full)
 
-    # 7. 상세 결과 테이블 & CSV 다운로드
-    render_detail_table(result, demand, months_full, strategy)
+    # 7. 수리 모델 & 파라미터 요약
+    render_model_expanders()
 
-    # 8. 수리 모델 & 파라미터 요약
-    render_model_expanders(params, n_periods)
-
-    # 9. 푸터
+    # 8. 푸터
     st.markdown(
         "<div style='text-align:center; padding:1.5rem 0 .5rem 0;"
         " color:#94a3b8; font-size:.85rem;'>"
