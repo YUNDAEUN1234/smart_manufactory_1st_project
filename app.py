@@ -1,8 +1,9 @@
 """
 총괄생산계획 (Aggregate Production Planning) 최적화 대시보드
 ------------------------------------------------------------
-강의록 (홍익대 Chunghun Ha 교수) 의 원예장비 제조업체 LP 예제를
-기반으로 한 인터랙티브 의사결정 도구입니다.
+원예장비 제조업체 사례를 기반으로 한 인터랙티브 의사결정 도구입니다.
+수요·비용·생산능력 파라미터를 자유롭게 조정하며
+LP 최적화 / 평준화 / 추종 세 전략을 즉시 비교할 수 있습니다.
 
 - 모델   : PuLP + CBC 솔버 (Streamlit Cloud에서 추가 설치 불필요)
 - 시각화 : Plotly (반응형, 한글 친화적)
@@ -196,7 +197,7 @@ with st.sidebar:
     with st.expander("📅 계획 기간 · 수요", expanded=True):
         n_periods = st.slider("계획 기간 (개월)", 3, 24, 6)
         st.markdown('<p class="small-note">월별 수요(개) — 표를 직접 편집하세요</p>', unsafe_allow_html=True)
-        # 강의록 기본값(1~6월) + 외삽
+        # 기본값(1~6월) + 외삽
         default = [1600, 3000, 3200, 3800, 2200, 2200]
         if n_periods <= 6:
             base = default[:n_periods]
@@ -260,7 +261,7 @@ with st.sidebar:
         integer_mode = st.checkbox(
             "정수 계획 (IP 모드)",
             value=False,
-            help="작업자/생산량을 정수로 강제 (강의록 IP 결과와 동일)",
+            help="작업자/생산량을 정수로 강제합니다.",
         )
         compare_all = st.checkbox("📊 전략별 비교 패널 표시", value=True)
 
@@ -325,7 +326,7 @@ total_ot = sum(result["O"][1:])
 total_short = sum(result["S"][1:])
 
 # 매출/이익(참고): 판가 40천원/개 가정
-revenue = 40.0 * total_demand  # 천원 (강의록 가정)
+revenue = 40.0 * total_demand  # 천원 (단가 40천원/개 가정)
 profit = revenue - total_cost_thou
 
 k1, k2, k3, k4, k5 = st.columns(5)
@@ -656,7 +657,7 @@ with st.expander("📐 수리적 모델 보기 (LP / IP 정식)", expanded=False
 - $P_t$: 생산량 / $I_t$: 기말 재고 / $S_t$: 부재고
 - $C_t$: 외주량 / $O_t$: 초과근무 시간
 
-##### 목적함수 (강의록 기본 파라미터 기준, 단위: 천원)
+##### 목적함수 (단위: 천원)
 $$\min Z = \sum_{t}\bigl(640\,W_t + 6\,O_t + 300\,H_t + 500\,L_t
 + 2\,I_t + 5\,S_t + 10\,P_t + 30\,C_t\bigr)$$
 
@@ -705,8 +706,7 @@ with st.expander("ℹ️ 입력 파라미터 요약", expanded=False):
 st.markdown(
     """
     <div style='text-align:center; padding:1.5rem 0 .5rem 0; color:#94a3b8; font-size:.85rem;'>
-        © 2026 총괄생산계획 최적화 대시보드 · 강의록 기반 (Pyomo → PuLP 포팅) ·
-        모델 검증: 강의록 LP 결과 422,275 천원과 일치 ✓
+        © 2026 총괄생산계획 최적화 대시보드 · Streamlit + PuLP + Plotly
     </div>
     """,
     unsafe_allow_html=True,
